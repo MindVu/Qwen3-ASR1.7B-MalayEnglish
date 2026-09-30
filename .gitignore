@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Data & Models (DO NOT COMMIT)
+data/
+datasets/
+*.wav
+*.mp3
+*.flac
+results/*.json
+!results/.gitkeep
+lora_finetuned/
+models/
+checkpoints/
+*.safetensors
+*.bin
+*.pt
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Profiling & Logs
+*.prof
+*.log
+runs/
+wandb/
