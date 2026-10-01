@@ -1,0 +1,14 @@
+torch
+transformers
+peft
+datasets
+evaluate
+jiwer
+librosa
+soundfile
+vllm
+fastapi
+uvicorn
+python-multipart
+aiohttp
+numpy

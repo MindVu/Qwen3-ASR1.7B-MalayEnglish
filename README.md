@@ -58,6 +58,54 @@ Also include at least one experiment that probably won't help (for example `torc
 - Answer the 5 Final Questions. For the 1,000-session design: replicated vLLM workers behind a load balancer, length-aware routing, autoscaling on queue depth, a separate CPU preprocessing tier, and capacity math from your measured streams per GPU with headroom.
 - Do a clean-clone run to verify reproducibility.
 
+## Quick Start: Training
+To build the 60-minute dataset and run the LoRA fine-tuning pipeline on Qwen3-ASR:
+
+### 0. Install Dependencies
+First, install the required packages for fine-tuning, inference, and benchmarking:
+```bash
+pip install -r requirements.txt
+```
+
+### 1. Data Preprocessing
+*Note: If the dataset is already prepared in `data/`, you can skip to step 2.*
+To download and filter the raw audio into the 60-minute code-switched benchmark, run the processing scripts from the `data/` directory:
+```bash
+cd data
+# Download the dataset from Hugging Face
+python ../process/download_data.py
+
+# Classify languages (Malay, English, Code-switched) using Qwen3-8B
+python ../process/language_classify.py
+
+# Form the final 60-minute subset
+python ../process/form_final_dataset.py
+cd ..
+```
+
+### 2. Prepare the dataset for training
+   ```bash
+   python finetune/prepare_data.py
+   ```
+   *This filters the baseline dataset down to the 60-minute subset, resamples to 16kHz mono, normalizes the text, and splits it into a 90/10 train/validation split.*
+
+### 3. Run fine-tuning
+   ```bash
+   python finetune/train_lora.py \
+  --train_file data/train.jsonl \
+  --eval_file data/eval.jsonl \
+  --output_dir ./runs/lora_r16 \
+  --use_lora
+   ```
+   *This will load the prepared dataset, freeze the encoder, apply LoRA to the decoder (`q_proj`, `v_proj`), and save the fine-tuned checkpoint to `results/lora_finetuned`.*
+
+### 4. Evaluate WER
+   ```bash
+   python finetune/eval_wer.py \
+       --predictions path/to/predictions.json \
+       --references path/to/references.json
+   ```
+
 ## Repo layout
 ```
 finetune/    prepare_data.py, train_lora.py, eval_wer.py
