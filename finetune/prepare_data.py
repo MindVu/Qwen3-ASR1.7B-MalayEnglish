@@ -14,11 +14,24 @@ Usage:
         --jsonl_path ../data/Revolab-ASR-Benchmark-Public-60min.jsonl \
         --output_dir ../data
 
-Produces:
+Produces three splits:
+    - test.jsonl:  ALL samples matching --eval_classification (e.g. Malay+
+                   English code-switch). Held out entirely -- never seen by
+                   training or used for checkpoint selection. Use this for
+                   final before/after WER reporting.
+    - train.jsonl: everything else, minus a random --valid_size fraction.
+    - valid.jsonl: a random --valid_size fraction carved out of the above,
+                   used as train_finetune.py's --eval_file for in-training
+                   loss monitoring / checkpoint comparison. Keeping this
+                   separate from test.jsonl means checkpoint selection never
+                   touches the set you report final numbers on.
+
     ../data/train.jsonl
-    ../data/eval.jsonl
+    ../data/valid.jsonl
+    ../data/test.jsonl
     ../data/audio_clips/train/<id>.wav
-    ../data/audio_clips/eval/<id>.wav
+    ../data/audio_clips/valid/<id>.wav
+    ../data/audio_clips/test/<id>.wav
 """
 
 import os
@@ -62,6 +75,7 @@ def load_and_prepare_60min_dataset(
     max_duration=30.0,
     seed=42,
     eval_classification="malay+english",
+    valid_size=0.1,
 ):
     """
     Loads the 60-minute dataset defined by Revolab-ASR-Benchmark-Public-60min.jsonl,
@@ -181,15 +195,26 @@ def load_and_prepare_60min_dataset(
 
     print(
         f"Split by classification='{eval_classification}': "
-        f"{len(eval_ds)} eval samples, {len(train_ds)} train samples."
+        f"{len(eval_ds)} test samples, {len(train_ds)} train+valid samples."
     )
 
-    split_dataset = DatasetDict({"train": train_ds, "test": eval_ds})
+    # 6. Carve a random dev split out of train (NOT out of the held-out test
+    #    set above). This gives train_finetune.py something to monitor
+    #    in-training loss against, without ever touching the set used for
+    #    final before/after WER reporting.
+    print(f"Randomly splitting train into train/valid ({int((1-valid_size)*100)}/{int(valid_size*100)}, seed={seed})...")
+    train_valid_split = train_ds.train_test_split(test_size=valid_size, seed=seed)
+    final_train_ds = train_valid_split["train"]
+    valid_ds = train_valid_split["test"]
 
-    train_duration = sum(train_ds["duration"]) / 60.0
-    eval_duration = sum(eval_ds["duration"]) / 60.0
-    print(f"Train split: {len(train_ds)} samples ({train_duration:.2f} min)")
-    print(f"Eval split:  {len(eval_ds)} samples ({eval_duration:.2f} min)")
+    split_dataset = DatasetDict({"train": final_train_ds, "validation": valid_ds, "test": eval_ds})
+
+    train_duration = sum(final_train_ds["duration"]) / 60.0
+    valid_duration = sum(valid_ds["duration"]) / 60.0
+    test_duration = sum(eval_ds["duration"]) / 60.0
+    print(f"Train split: {len(final_train_ds)} samples ({train_duration:.2f} min)")
+    print(f"Valid split: {len(valid_ds)} samples ({valid_duration:.2f} min)")
+    print(f"Test split:  {len(eval_ds)} samples ({test_duration:.2f} min)")
 
     return split_dataset
 
@@ -232,9 +257,12 @@ def main():
     parser.add_argument("--dataset_dir", type=str, default=None, help="Path to Revolab-ASR-Benchmark-Public directory")
     parser.add_argument("--jsonl_path", type=str, default=None, help="Path to Revolab-ASR-Benchmark-Public-60min.jsonl")
     parser.add_argument("--output_dir", type=str, default=None,
-                         help="Directory to write train.jsonl / eval.jsonl / audio_clips/ into")
+                         help="Directory to write train.jsonl / valid.jsonl / test.jsonl / audio_clips/ into")
     parser.add_argument("--test_size", type=float, default=0.1,
-                         help="Unused now that eval is classification-based; kept for backward compatibility.")
+                         help="Unused now that test is classification-based; kept for backward compatibility.")
+    parser.add_argument("--valid_size", type=float, default=0.1,
+                         help="Fraction of the non-test data to randomly hold out as a dev/validation "
+                              "set (used as train_finetune.py's --eval_file for in-training monitoring).")
     parser.add_argument("--max_duration", type=float, default=30.0, help="Maximum clip duration in seconds (default: 30.0)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed (no longer affects the split, kept for compatibility)")
     parser.add_argument("--eval_classification", type=str, default="malay+english",
@@ -262,6 +290,7 @@ def main():
         max_duration=args.max_duration,
         seed=args.seed,
         eval_classification=args.eval_classification,
+        valid_size=args.valid_size,
     )
 
     if args.save_arrow_dataset:
@@ -271,11 +300,15 @@ def main():
 
     print(f"Writing JSONL + wav output to: {output_dir}")
     write_jsonl_split(split_dataset["train"], "train", audio_root, output_dir / "train.jsonl", args.prompt)
-    write_jsonl_split(split_dataset["test"], "eval", audio_root, output_dir / "eval.jsonl", args.prompt)
+    write_jsonl_split(split_dataset["validation"], "valid", audio_root, output_dir / "valid.jsonl", args.prompt)
+    write_jsonl_split(split_dataset["test"], "test", audio_root, output_dir / "test.jsonl", args.prompt)
 
-    print("\n60-minute dataset preparation complete. Point train_finetune.py at:")
+    print("\n60-minute dataset preparation complete.")
+    print("For training (dev set = random split, NOT the held-out Malay+English set):")
     print(f"  --train_file {output_dir / 'train.jsonl'}")
-    print(f"  --eval_file {output_dir / 'eval.jsonl'}")
+    print(f"  --eval_file {output_dir / 'valid.jsonl'}")
+    print("For final before/after WER reporting, use the held-out set separately:")
+    print(f"  {output_dir / 'test.jsonl'}")
 
 
 if __name__ == "__main__":

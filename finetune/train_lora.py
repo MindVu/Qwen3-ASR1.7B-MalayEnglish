@@ -274,7 +274,7 @@ def parse_args():
     # Paths
     p.add_argument("--model_path", type=str, default="Qwen/Qwen3-ASR-1.7B")
     p.add_argument("--train_file", type=str, default="train.jsonl")
-    p.add_argument("--eval_file", type=str, default="")
+    p.add_argument("--eval_file", type=str, default="valid.jsonl")
     p.add_argument("--output_dir", type=str, default="./qwen3-asr-finetuning-out")
 
     # Audio
@@ -284,10 +284,10 @@ def parse_args():
     # NB: the reference defaults (batch_size=32) assume a large-hour dataset
     # on a big GPU. For a 30-60 min assessment dataset, start much smaller
     # (e.g. 2-4) and rely on grad_acc for effective batch size.
-    p.add_argument("--batch_size", type=int, default=2)
+    p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--grad_acc", type=int, default=8)
     p.add_argument("--lr", type=float, default=2e-5)
-    p.add_argument("--epochs", type=float, default=3)
+    p.add_argument("--epochs", type=float, default=10)
     p.add_argument("--log_steps", type=int, default=10)
     p.add_argument("--lr_scheduler_type", type=str, default="linear")
     p.add_argument("--warmup_ratio", type=float, default=0.02)
