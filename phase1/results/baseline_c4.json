@@ -1,0 +1,68 @@
+{
+  "concurrency": 4,
+  "config": {
+    "model": "Qwen/Qwen3-ASR-1.7B",
+    "device": "cuda:0 (NVIDIA A100-SXM4-40GB)",
+    "dtype": "float32",
+    "batch_size": 1,
+    "architecture": "Single GPU Worker + Bounded Async Queue (no batching)",
+    "warmup_requests": 5,
+    "total_requests": 60,
+    "requests_per_bucket": 20
+  },
+  "status": {
+    "successful_requests": 60,
+    "failed_requests": 0
+  },
+  "throughput": {
+    "wall_time_s": 46.87,
+    "total_audio_s": 490.8,
+    "audio_s_per_wall_s": 10.44,
+    "requests_per_s": 1.28
+  },
+  "rtf_server": {
+    "n": 60,
+    "avg": 0.1148,
+    "p50": 0.1038,
+    "p90": 0.155,
+    "p95": 0.1797,
+    "min": 0.0522,
+    "max": 0.2867
+  },
+  "rtf_model_only": {
+    "n": 60,
+    "avg": 0.1141,
+    "p50": 0.1034,
+    "p95": 0.1778
+  },
+  "queue_wait_time_s": {
+    "n": 60,
+    "avg": 1.17,
+    "p95": 2.22
+  },
+  "bucket_breakdown": {
+    "2-5s": {
+      "n_requests": 20,
+      "avg_duration_s": 3.65,
+      "rtf": {"n": 20, "avg": 0.1260, "p50": 0.1218, "p95": 0.1554}
+    },
+    "5-15s": {
+      "n_requests": 20,
+      "avg_duration_s": 10.42,
+      "rtf": {"n": 20, "avg": 0.0917, "p50": 0.0938, "p95": 0.1192}
+    },
+    "15-30s": {
+      "n_requests": 20,
+      "avg_duration_s": 18.25,
+      "rtf": {"n": 20, "avg": 0.0838, "p50": 0.0899, "p95": 0.1021}
+    }
+  },
+  "gpu": {
+    "gpu_util_avg_pct": 40.2,
+    "gpu_util_max_pct": 44.0,
+    "gpu_mem_used_peak_mb": 5883.9,
+    "gpu_mem_used_avg_mb": 5400.3,
+    "torch_peak_allocated_mb": 4131.0,
+    "torch_peak_reserved_mb": 4846.0
+  }
+}

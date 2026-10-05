@@ -1,0 +1,43 @@
+# ==============================================================================
+# Phase 1: Baseline Inference Server & Benchmark Configuration
+# Model: Qwen3-ASR 1.7B with LoRA Adapter
+# Objective: Establish unoptimized baseline with asynchronous request handling
+# ==============================================================================
+
+model:
+  model_path: "Qwen/Qwen3-ASR-1.7B"
+  adapter_path: "runs/lora_r16/checkpoint-42"  # LoRA adapter checkpoint
+  device: "cuda"          # "cuda" or "cpu"
+  dtype: "float32"        # Baseline precision: "float32" (FP32). Also supports "float16", "bfloat16"
+  max_new_tokens: 512
+  sample_rate: 16000
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  max_queue_size: 64      # Bounded inference queue capacity
+  overload_status_code: 429 # HTTP 429 Too Many Requests (or 503 Service Unavailable)
+  timeout_seconds: 60.0
+
+benchmark:
+  server_url: "http://127.0.0.1:8000/transcribe"
+  test_file: "data/test.jsonl"
+  audio_dir: "data/audio_clips/test"
+  output_dir: "results"
+  concurrencies: [1, 2, 4, 8, 16, 32, 64]
+  warmup_requests: 5
+  requests_per_bucket: 20
+  duration_buckets:
+    - name: "2-5s"
+      min_s: 2.0
+      max_s: 5.0
+    - name: "5-15s"
+      min_s: 5.0
+      max_s: 15.0
+    - name: "15-30s"
+      min_s: 15.0
+      max_s: 30.0
+
+monitoring:
+  gpu_device_index: 0
+  sample_interval_s: 0.05
