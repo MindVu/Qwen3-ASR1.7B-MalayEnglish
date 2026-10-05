@@ -1,0 +1,132 @@
+{
+  "environment": {
+    "gpu_model": "NVIDIA A100-SXM4-40GB",
+    "gpu_memory_gb": 39.5,
+    "cpu": "AMD EPYC 7713 64-Core Processor (128 logical cores)",
+    "ram_gb": 503.3,
+    "os": "Linux-4.18.0-553.125.1.el8_10.x86_64-x86_64-with-glibc2.28",
+    "python": "3.12.14",
+    "cuda_version (torch)": "12.8",
+    "cudnn_version": 91900,
+    "pytorch_version": "2.11.0+cu128",
+    "transformers_version": "4.57.6",
+    "qwen_asr_version": "0.0.6",
+    "peft_version": "0.21.2",
+    "flash_attn_version": "2.8.3.post1",
+    "inference_framework": "HuggingFace transformers (eager generate, batch=1) via qwen_asr",
+    "attention_implementation": "sdpa",
+    "precision": "bfloat16",
+    "gpu_compute_capability": "8.0",
+    "nvidia_driver": "570.124.06",
+    "model": "Qwen/Qwen3-ASR-1.7B",
+    "adapter": null,
+    "model_load_time_s": 35.32,
+    "model_weights_vram_mb": 3894.9
+  },
+  "config": {
+    "warmup": 3,
+    "repeats": 1,
+    "batch_size": 1,
+    "concurrency": 1,
+    "max_new_tokens": 512,
+    "include_load_in_rtf": false,
+    "n_requests": 43
+  },
+  "rtf_e2e": {
+    "n": 43,
+    "avg": 0.1148,
+    "p50": 0.1038,
+    "p95": 0.1797,
+    "min": 0.0522,
+    "max": 0.2867
+  },
+  "rtf_model_only": {
+    "n": 43,
+    "avg": 0.1141,
+    "p50": 0.1034,
+    "p95": 0.1778,
+    "min": 0.052,
+    "max": 0.2827
+  },
+  "rtf_e2e_by_bucket": {
+    "<2s": {
+      "n": 6,
+      "avg": 0.1908,
+      "p50": 0.1772,
+      "p95": 0.2694,
+      "min": 0.124,
+      "max": 0.2867
+    },
+    "2-5s": {
+      "n": 13,
+      "avg": 0.126,
+      "p50": 0.1218,
+      "p95": 0.1554,
+      "min": 0.0944,
+      "max": 0.1557
+    },
+    "5-15s": {
+      "n": 19,
+      "avg": 0.0917,
+      "p50": 0.0938,
+      "p95": 0.1192,
+      "min": 0.057,
+      "max": 0.1273
+    },
+    "15-30s": {
+      "n": 4,
+      "avg": 0.0838,
+      "p50": 0.0899,
+      "p95": 0.1021,
+      "min": 0.0522,
+      "max": 0.1031
+    },
+    ">30s": {
+      "n": 1,
+      "avg": 0.0778,
+      "p50": 0.0778,
+      "p95": 0.0778,
+      "min": 0.0778,
+      "max": 0.0778
+    }
+  },
+  "latency_breakdown_avg_s": {
+    "t_load_s": 1.1143,
+    "t_preprocess_s": 0.0029,
+    "t_generate_s": 0.7805,
+    "t_decode_s": 0.0002
+  },
+  "latency_breakdown_pct_of_total": {
+    "preprocess": 0.4,
+    "generate": 99.6,
+    "decode": 0.0
+  },
+  "gpu": {
+    "gpu_util_avg_pct": 40.2,
+    "gpu_util_max_pct": 44.0,
+    "gpu_mem_used_peak_mb": 5883.9,
+    "gpu_mem_used_avg_mb": 5400.3,
+    "n_samples": 666,
+    "torch_peak_allocated_mb": 4131.0,
+    "torch_peak_reserved_mb": 4846.0
+  },
+  "throughput": {
+    "wall_time_s": 33.7,
+    "audio_seconds_total": 351.9,
+    "audio_s_per_wall_s": 10.441,
+    "requests_per_s": 1.276,
+    "generated_tokens_per_s": 41.52,
+    "realtime_streams_equivalent_at_rtf1": 10.44
+  },
+  "wer": {
+    "overall": 0.3264,
+    "n_utterances": 43,
+    "by_bucket": {
+      "<2s": 0.7692,
+      "2-5s": 0.396,
+      "5-15s": 0.2851,
+      "15-30s": 0.3359,
+      ">30s": 0.2632
+    }
+  }
+}

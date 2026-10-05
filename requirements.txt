@@ -12,3 +12,4 @@ uvicorn
 python-multipart
 aiohttp
 numpy
+dotenv

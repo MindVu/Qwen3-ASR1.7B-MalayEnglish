@@ -10,19 +10,24 @@
 # model's general ASR ability. LoRA restricts updates to low-rank adapters
 # on the thinker's linear layers, which is far more appropriate at this
 # data scale -- see the fine-tuning report for the full justification.
+#
+# LOGGING: plain text file instead of TensorBoard. Trainer's report_to is
+# disabled entirely; TextFileLoggerCallback below writes one line per log
+# event (loss/lr/epoch/eval_loss/GPU memory) directly to --log_file.
 import argparse
 import os
 import re
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import librosa
 import torch
 import torch.nn as nn
+# torch.backends.cudnn.enabled = False
 from datasets import load_dataset
 from qwen_asr import Qwen3ASRModel
-from torch.utils.tensorboard import SummaryWriter
 from transformers import (GenerationConfig, Trainer, TrainerCallback,
                           TrainingArguments)
 
@@ -127,12 +132,14 @@ def build_prefix_messages(prompt: str, audio_array):
 
 def make_preprocess_fn_prefix_only(processor):
     def _preprocess(ex: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = ex.get("prompt", "")
+        # prompt = ex.get("prompt", "")
+        prompt = ""
         dummy_audio = None
         prefix_msgs = build_prefix_messages(prompt, dummy_audio)
         prefix_text = processor.apply_chat_template(
             [prefix_msgs], add_generation_prompt=True, tokenize=False
         )[0]
+        # print(prefix_text)
         return {
             "prompt": prompt,
             "audio": ex["audio"],
@@ -155,6 +162,7 @@ class DataCollatorForQwen3ASRFinetuning:
 
         eos = self.processor.tokenizer.eos_token or ""
         full_texts = [pfx + tgt + eos for pfx, tgt in zip(prefix_texts, targets)]
+        # print(full_texts)
         audios = [load_audio(p, sr=self.sampling_rate) for p in audio_paths]
 
         full_inputs = self.processor(
@@ -174,8 +182,14 @@ class DataCollatorForQwen3ASRFinetuning:
 
         prefix_lens = prefix_inputs["attention_mask"].sum(dim=1).tolist()
         labels = full_inputs["input_ids"].clone()
+        # for i, pl in enumerate(prefix_lens):
+        #     labels[i, :pl] = -100
+        seq_len = full_inputs["input_ids"].size(1)
+        full_lens = full_inputs["attention_mask"].sum(dim=1).tolist()
+
         for i, pl in enumerate(prefix_lens):
-            labels[i, :pl] = -100
+            start = seq_len - full_lens[i]
+            labels[i, start : start + pl] = -100
 
         pad_id = self.processor.tokenizer.pad_token_id
         if pad_id is not None:
@@ -232,41 +246,116 @@ class MakeEveryCheckpointInferableCallback(TrainerCallback):
         return control
 
 
-class ExtraTensorBoardMetricsCallback(TrainerCallback):
+class TextFileLoggerCallback(TrainerCallback):
     """
-    Logs GPU memory usage and run config (trainable params, LoRA settings)
-    to TensorBoard, in addition to the loss/lr/epoch Trainer already reports
-    via report_to=["tensorboard"]. Uses its own SummaryWriter pointed at the
-    same logging_dir, so it shows up as extra scalar tags in the same run
-    rather than depending on callback ordering with HF's own TensorBoardCallback.
+    Writes training progress to a plain .txt file instead of TensorBoard:
+    a run-config header at the start, one line per log event (loss, lr,
+    epoch, eval_loss -- whatever Trainer's own logging produces) with GPU
+    memory appended, and a footer at the end. Appends across resumed runs
+    rather than overwriting.
     """
 
-    def __init__(self, logging_dir: str, run_metadata: Dict[str, Any]):
-        self.writer = SummaryWriter(log_dir=logging_dir)
+    def __init__(self, log_file: str, run_metadata: Dict[str, Any]):
+        self.log_file = log_file
+        log_dir = os.path.dirname(os.path.abspath(log_file))
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
         self.run_metadata = run_metadata
+
+    def _write(self, line: str):
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(line.rstrip("\n") + "\n")
 
     def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
         if args.process_index != 0:
             return control
-        text = "\n".join(f"- **{k}**: {v}" for k, v in self.run_metadata.items())
-        self.writer.add_text("run_config", text, global_step=0)
+        self._write("=" * 70)
+        self._write(f"Run started: {datetime.now().isoformat()}")
+        for k, v in self.run_metadata.items():
+            self._write(f"  {k}: {v}")
+        self._write("=" * 70)
         return control
 
-    def on_log(self, args: TrainingArguments, state, control, **kwargs):
-        if args.process_index != 0 or not torch.cuda.is_available():
+    def on_log(self, args: TrainingArguments, state, control, logs=None, **kwargs):
+        if args.process_index != 0 or logs is None:
             return control
-        step = state.global_step
-        self.writer.add_scalar("gpu/memory_allocated_gb", torch.cuda.memory_allocated() / 1e9, step)
-        self.writer.add_scalar("gpu/memory_reserved_gb", torch.cuda.memory_reserved() / 1e9, step)
-        self.writer.add_scalar("gpu/max_memory_allocated_gb", torch.cuda.max_memory_allocated() / 1e9, step)
+
+        gpu_mem = ""
+        if torch.cuda.is_available():
+            gpu_mem = (
+                f" | gpu_mem_alloc_gb={torch.cuda.memory_allocated() / 1e9:.2f}"
+                f" gpu_mem_reserved_gb={torch.cuda.memory_reserved() / 1e9:.2f}"
+                f" gpu_mem_peak_gb={torch.cuda.max_memory_allocated() / 1e9:.2f}"
+            )
+
+        logs_str = " ".join(
+            f"{k}={v:.6g}" if isinstance(v, float) else f"{k}={v}"
+            for k, v in logs.items()
+        )
+        self._write(f"[step {state.global_step}] {logs_str}{gpu_mem}")
         return control
 
     def on_train_end(self, args: TrainingArguments, state, control, **kwargs):
         if args.process_index == 0:
-            self.writer.flush()
-            self.writer.close()
+            self._write(f"Run finished: {datetime.now().isoformat()}")
+            self._write("=" * 70)
         return control
 
+
+def debug_training_loss(model, processor, collator, dataset, device):
+    print("\n" + "=" * 70)
+    print("DEBUG: TRAINING LOSS")
+    print("=" * 70)
+
+    features = [dataset[i] for i in range(min(3, len(dataset)))]
+    batch = collator(features)
+
+    batch = {
+        k: v.to(device) if torch.is_tensor(v) else v
+        for k, v in batch.items()
+    }
+
+    for k, v in batch.items():
+        if torch.is_tensor(v):
+            print(f"{k}: shape={tuple(v.shape)}, dtype={v.dtype}")
+
+    labels = batch["labels"]
+
+    for i in range(labels.shape[0]):
+        print(f"\n--- sample {i} ---")
+
+        ids = batch["input_ids"][i]
+        labs = batch["labels"][i]
+
+        print("input_ids:")
+        print(ids.tolist())
+
+        print("\nlabels:")
+        print(labs.tolist())
+
+        print("\nDecoded input:")
+        print(repr(processor.tokenizer.decode(
+            ids,
+            skip_special_tokens=False
+        )))
+
+        print("\nDecoded valid labels:")
+        valid = labs[labs != -100]
+        print(repr(processor.tokenizer.decode(
+        valid,
+        skip_special_tokens=False
+    )))
+
+    model.eval()
+
+    with torch.no_grad():
+        outputs = model(**batch)
+
+    print("\nModel loss:", outputs.loss.item())
+
+    model.train()
+
+    print("=" * 70)
 
 def parse_args():
     p = argparse.ArgumentParser("Qwen3-ASR Finetuning (full FT or LoRA)")
@@ -274,7 +363,7 @@ def parse_args():
     # Paths
     p.add_argument("--model_path", type=str, default="Qwen/Qwen3-ASR-1.7B")
     p.add_argument("--train_file", type=str, default="train.jsonl")
-    p.add_argument("--eval_file", type=str, default="valid.jsonl")
+    p.add_argument("--eval_file", type=str, default="")
     p.add_argument("--output_dir", type=str, default="./qwen3-asr-finetuning-out")
 
     # Audio
@@ -286,9 +375,9 @@ def parse_args():
     # (e.g. 2-4) and rely on grad_acc for effective batch size.
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--grad_acc", type=int, default=8)
-    p.add_argument("--lr", type=float, default=2e-5)
+    p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--epochs", type=float, default=10)
-    p.add_argument("--log_steps", type=int, default=10)
+    p.add_argument("--log_steps", type=int, default=1)
     p.add_argument("--lr_scheduler_type", type=str, default="linear")
     p.add_argument("--warmup_ratio", type=float, default=0.02)
 
@@ -309,16 +398,20 @@ def parse_args():
     p.add_argument("--persistent_workers", type=int, default=1)
     p.add_argument("--prefetch_factor", type=int, default=2)
 
-    # Save
-    p.add_argument("--save_strategy", type=str, default="steps")
-    p.add_argument("--save_steps", type=int, default=50)
+    # Save / eval: both per-epoch now. --save_steps kept only as a no-op
+    # placeholder for backward compatibility with anything that still
+    # passes it; it has no effect unless --save_strategy steps is used.
+    p.add_argument("--save_strategy", type=str, default="epoch",
+                    help="'epoch' (default) or 'steps'.")
+    p.add_argument("--save_steps", type=int, default=50,
+                    help="Only used if --save_strategy steps is passed explicitly.")
     p.add_argument("--save_total_limit", type=int, default=5)
 
     # Logging
-    p.add_argument("--logging_dir", type=str, default=None,
-                    help="TensorBoard log dir. Defaults to <output_dir>/tensorboard.")
-    p.add_argument("--report_to", type=str, default="tensorboard",
-                    help="Passed to TrainingArguments.report_to. Use 'none' to disable.")
+    p.add_argument("--log_file", type=str, default=None,
+                    help="Plain text log file. Defaults to <output_dir>/train_log.txt.")
+    p.add_argument("--disable_text_log", action="store_true",
+                    help="Skip writing the text log entirely.")
 
     # Resume
     p.add_argument("--resume_from", type=str, default="")
@@ -341,6 +434,9 @@ def main():
     )
     model = asr_wrapper.model
     processor = asr_wrapper.processor
+    print("padding_side:", processor.tokenizer.padding_side)
+    print("pad_token:", processor.tokenizer.pad_token)
+    print("pad_token_id:", processor.tokenizer.pad_token_id)
 
     patch_outer_forward(model)
 
@@ -384,7 +480,27 @@ def main():
 
     collator = DataCollatorForQwen3ASRFinetuning(processor=processor, sampling_rate=args_cli.sr)
 
-    logging_dir = args_cli.logging_dir or os.path.join(args_cli.output_dir, "tensorboard")
+    # debug_training_loss(
+    #     model=model,
+    #     processor=processor,
+    #     collator=collator,
+    #     dataset=ds["train"],
+    #     device=next(model.parameters()).device,
+    # )
+
+    # Sanity check on one real batch BEFORE building the Trainer / touching
+    # the GPU for training. Catches a malformed batch (wrong shape, NaN/Inf
+    # from a bad audio file) with a clear message instead of a cryptic
+    # downstream CUDA/cuDNN failure. Runs regardless of --resume.
+    print("[sanity check] inspecting one batch from ds['train']...")
+    _check_batch = collator([ds["train"][i] for i in range(min(2, len(ds["train"])))])
+    for k, v in _check_batch.items():
+        if hasattr(v, "shape"):
+            has_nan = torch.isnan(v.float()).any().item() if v.is_floating_point() else "n/a"
+            print(f"  {k}: shape={tuple(v.shape)} dtype={v.dtype} nan={has_nan}")
+    del _check_batch
+
+    log_file = args_cli.log_file or os.path.join(args_cli.output_dir, "train_log.txt")
 
     training_args = TrainingArguments(
         output_dir=args_cli.output_dir,
@@ -393,20 +509,19 @@ def main():
         learning_rate=args_cli.lr,
         num_train_epochs=args_cli.epochs,
         logging_steps=args_cli.log_steps,
-        logging_dir=logging_dir,
-        report_to=[args_cli.report_to] if args_cli.report_to != "none" else [],
+        report_to=[],  # TensorBoard/wandb disabled -- logging goes to log_file instead
         lr_scheduler_type=args_cli.lr_scheduler_type,
         warmup_ratio=args_cli.warmup_ratio,
         dataloader_num_workers=args_cli.num_workers,
         dataloader_pin_memory=(args_cli.pin_memory == 1),
         dataloader_persistent_workers=(args_cli.persistent_workers == 1),
         dataloader_prefetch_factor=args_cli.prefetch_factor if args_cli.num_workers > 0 else None,
+        # Save and eval both per-epoch now.
         save_strategy=args_cli.save_strategy,
-        save_steps=args_cli.save_steps,
+        save_steps=args_cli.save_steps if args_cli.save_strategy == "steps" else None,
         save_total_limit=args_cli.save_total_limit,
         save_safetensors=True,
-        eval_strategy="steps",
-        eval_steps=args_cli.save_steps,
+        eval_strategy="epoch" if args_cli.eval_file else "no",
         do_eval=bool(args_cli.eval_file),
         bf16=use_bf16,
         fp16=not use_bf16,
@@ -426,11 +541,13 @@ def main():
         "learning_rate": args_cli.lr,
         "epochs": args_cli.epochs,
         "precision": "bf16" if use_bf16 else "fp16",
+        "save_strategy": args_cli.save_strategy,
+        "eval_strategy": "epoch" if args_cli.eval_file else "no",
     }
 
     callbacks = [MakeEveryCheckpointInferableCallback(base_model_path=args_cli.model_path)]
-    if args_cli.report_to != "none":
-        callbacks.append(ExtraTensorBoardMetricsCallback(logging_dir=logging_dir, run_metadata=run_metadata))
+    if not args_cli.disable_text_log:
+        callbacks.append(TextFileLoggerCallback(log_file=log_file, run_metadata=run_metadata))
 
     trainer = CastFloatInputsTrainer(
         model=model,
@@ -442,9 +559,8 @@ def main():
         callbacks=callbacks,
     )
 
-    if args_cli.report_to != "none":
-        print(f"TensorBoard logging to: {logging_dir}")
-        print(f"View with: tensorboard --logdir {logging_dir}")
+    if not args_cli.disable_text_log:
+        print(f"Logging to text file: {log_file}")
 
     resume_from = (args_cli.resume_from or "").strip()
     if not resume_from and args_cli.resume == 1:

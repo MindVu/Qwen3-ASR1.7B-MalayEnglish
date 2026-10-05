@@ -93,8 +93,8 @@ cd ..
    ```bash
    python finetune/train_lora.py \
   --train_file data/train.jsonl \
-  --eval_file data/eval.jsonl \
-  --output_dir ./runs/lora_r16 \
+  --eval_file data/valid.jsonl \
+  --output_dir ./runs/lora_r32 \
   --use_lora
    ```
    *This will load the prepared dataset, freeze the encoder, apply LoRA to the decoder (`q_proj`, `v_proj`), and save the fine-tuned checkpoint to `results/lora_finetuned`.*

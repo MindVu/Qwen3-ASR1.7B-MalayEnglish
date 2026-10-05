@@ -8,14 +8,14 @@ from datasets import load_from_disk
 # Config
 # ============================================================
 
-DATASET_DIR = "./Revolab-ASR-Benchmark-Public"
+DATASET_DIR = "./data/Revolab-ASR-Benchmark-Public"
 
 CLASSIFIED_JSONL = (
-    "./Revolab-ASR-Benchmark-Public-classified.jsonl"
+    "./data/Revolab-ASR-Benchmark-Public-classified.jsonl"
 )
 
 OUTPUT_JSONL = (
-    "./Revolab-ASR-Benchmark-Public-60min.jsonl"
+    "./data/Revolab-ASR-Benchmark-Public-60min.jsonl"
 )
 
 TARGET_DURATION = 60 * 60  # 60 minutes

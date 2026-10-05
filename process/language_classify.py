@@ -1,13 +1,28 @@
 import os
 import json
+from pathlib import Path
+from dotenv import load_dotenv
 
 from datasets import load_from_disk
 from vllm import LLM, SamplingParams
 
 
-DATASET_DIR = "./Revolab-ASR-Benchmark-Public"
+# Load environment variables (such as HF_TOKEN)
+env_path = Path(__file__).resolve().parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
+
+
+DATASET_DIR = (
+    "./data/Revolab-ASR-Benchmark-Public"
+    if os.path.exists("./data/Revolab-ASR-Benchmark-Public")
+    else "./Revolab-ASR-Benchmark-Public"
+)
 MODEL_NAME = "Qwen/Qwen3-8B"
-OUTPUT_FILE = "./Revolab-ASR-Benchmark-Public-classified.jsonl"
+MODELS_DIR = "./models"
+OUTPUT_FILE = "./data/Revolab-ASR-Benchmark-Public-classified.jsonl"
 
 
 SYSTEM_PROMPT = """You are a language identification classifier for Malaysian speech transcripts.
@@ -113,8 +128,17 @@ def main():
     # Load Qwen
     # --------------------------------------------------------
 
+    os.makedirs(MODELS_DIR, exist_ok=True)
+
+    # Use local directory if already downloaded, otherwise load MODEL_NAME with download_dir
+    local_model_path = os.path.join(MODELS_DIR, "Qwen3-8B")
+    if not os.path.exists(local_model_path):
+        local_model_path = os.path.join(MODELS_DIR, "Qwen/Qwen3-8B")
+    model_to_load = local_model_path if os.path.exists(local_model_path) else MODEL_NAME
+
     llm = LLM(
-        model=MODEL_NAME,
+        model=model_to_load,
+        download_dir=MODELS_DIR,
         trust_remote_code=True,
         tensor_parallel_size=1,
         gpu_memory_utilization=0.90,
