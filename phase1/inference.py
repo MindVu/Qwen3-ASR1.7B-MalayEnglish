@@ -34,6 +34,9 @@ logger = logging.getLogger("qwen_asr.inference")
 
 def clean_prediction(text: str) -> str:
     """Extract clean transcript if Qwen3-ASR outputs language tokens like '<asr_text>'."""
+    if text is None:
+        return ""
+    text = str(text)
     if "<asr_text>" in text:
         text = text.split("<asr_text>", 1)[1]
     return text.strip()

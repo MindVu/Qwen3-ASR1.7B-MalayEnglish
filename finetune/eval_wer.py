@@ -134,7 +134,7 @@ def load_infer_output(path):
             skipped_no_pred += 1
             continue
 
-        ref_raw = item.get("transcript", item.get("text"))
+        ref_raw = item.get("transcript", item.get("reference", item.get("text")))
         if ref_raw is None:
             skipped_no_ref += 1
             continue

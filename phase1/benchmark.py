@@ -110,7 +110,12 @@ def load_dataset_samples(
                     "audio_path": audio_path,
                     "duration": dur,
                     "prompt": item.get("prompt", "Transcribe the audio accurately."),
-                    "reference": item.get("transcript") or item.get("text", ""),
+                    "reference": (
+                        (item.get("transcript") or item.get("reference") or item.get("text", ""))
+                        .split("<asr_text>", 1)[1].strip()
+                        if "<asr_text>" in str(item.get("transcript") or item.get("reference") or item.get("text", ""))
+                        else str(item.get("transcript") or item.get("reference") or item.get("text", "")).strip()
+                    ),
                     "bucket": bucket,
                 })
 

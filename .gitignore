@@ -39,3 +39,8 @@ checkpoints/
 *.log
 runs/
 wandb/
+
+# Runtime & scratch
+*.pid
+out/
+test.py

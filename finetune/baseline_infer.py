@@ -183,38 +183,130 @@ class GPUMonitor:
 
 
 # ----------------------------------------------------------------------
-# WER (self-contained, no extra dependency)
+# Text normalization & WER evaluation
 # ----------------------------------------------------------------------
-def normalize_text(s):
-    s = s.lower()
-    s = re.sub(r"[^\w\s']", " ", s, flags=re.UNICODE)
-    return re.sub(r"\s+", " ", s).strip()
+try:
+    from prepare_data import normalize_text, ASR_TEXT_TAG
+except ImportError:
+    try:
+        from finetune.prepare_data import normalize_text, ASR_TEXT_TAG
+    except ImportError:
+        ASR_TEXT_TAG = "<asr_text>"
+
+        def normalize_text(text: str) -> str:
+            if text is None:
+                return ""
+            text = text.lower()
+            text = re.sub(r"[^a-z0-9'\s]", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            return text
 
 
-def clean_prediction(s):
-    """Qwen3-ASR may emit 'language English<asr_text>...' - keep only the transcript."""
-    if "<asr_text>" in s:
-        s = s.split("<asr_text>", 1)[1]
-    return s.strip()
+def strip_language_tag(text):
+    """
+    Removes the "language {Lang}<asr_text>" prefix the fine-tuned model is
+    trained to emit, leaving just the transcript. Safe to call on text that
+    never had the tag (e.g. scoring the base/non-fine-tuned model, or an
+    already-clean reference) -- returned unchanged in that case rather than
+    mangled.
+    """
+    if text is None:
+        return ""
+    text = str(text)
+    if ASR_TEXT_TAG in text:
+        return text.split(ASR_TEXT_TAG, 1)[1].strip()
+    return text.strip()
 
 
-def edit_distance(ref, hyp):
-    d = list(range(len(hyp) + 1))
-    for i, r in enumerate(ref, 1):
-        prev, d[0] = d[0], i
-        for j, h in enumerate(hyp, 1):
-            cur = min(d[j] + 1, d[j - 1] + 1, prev + (r != h))
-            prev, d[j] = d[j], cur
-    return d[len(hyp)]
+clean_prediction = strip_language_tag
+
+
+def extract_reference_text(s, ref_key="text"):
+    """
+    Extracts the reference transcript from a sample dictionary, prioritizing
+    clean/untagged fields ('transcript', 'reference') over 'text' or custom ref_key,
+    and strips any language tags.
+    """
+    if isinstance(s, str):
+        return strip_language_tag(s)
+    if isinstance(s, dict):
+        for key in ["transcript", "reference", ref_key, "text", "normalized_text", "raw_text"]:
+            if key in s and s[key] is not None:
+                return strip_language_tag(s[key])
+    return None
+
+
+def compute_wer_builtin(predictions, references):
+    """
+    Standard dynamic programming Word Error Rate (WER) computation.
+    """
+    total_words = 0
+    total_edits = 0
+
+    for pred, ref in zip(predictions, references):
+        ref_words = ref.strip().split()
+        pred_words = pred.strip().split()
+
+        r_len = len(ref_words)
+        p_len = len(pred_words)
+        total_words += r_len
+
+        # DP table: dp[i][j] = min edits between ref_words[:i] and pred_words[:j]
+        dp = [[0] * (p_len + 1) for _ in range(r_len + 1)]
+
+        for i in range(r_len + 1):
+            dp[i][0] = i
+        for j in range(p_len + 1):
+            dp[0][j] = j
+
+        for i in range(1, r_len + 1):
+            for j in range(1, p_len + 1):
+                if ref_words[i - 1] == pred_words[j - 1]:
+                    dp[i][j] = dp[i - 1][j - 1]
+                else:
+                    dp[i][j] = 1 + min(
+                        dp[i - 1][j],      # Deletion
+                        dp[i][j - 1],      # Insertion
+                        dp[i - 1][j - 1],  # Substitution
+                    )
+
+        total_edits += dp[r_len][p_len]
+
+    if total_words == 0:
+        return 0.0
+    return total_edits / total_words
+
+
+def compute_wer(predictions, references, normalize=True):
+    """
+    Calculates WER using evaluate, jiwer, or builtin DP fallback.
+    """
+    if len(predictions) == 0:
+        return 0.0
+
+    if normalize:
+        preds = [normalize_text(strip_language_tag(p)) for p in predictions]
+        refs = [normalize_text(strip_language_tag(r)) for r in references]
+    else:
+        preds = [strip_language_tag(p) for p in predictions]
+        refs = [strip_language_tag(r) for r in references]
+
+    try:
+        import evaluate
+        wer_metric = evaluate.load("wer")
+        wer = wer_metric.compute(predictions=preds, references=refs)
+    except Exception:
+        try:
+            import jiwer
+            wer = jiwer.wer(reference=refs, hypothesis=preds)
+        except Exception:
+            wer = compute_wer_builtin(predictions=preds, references=refs)
+    return float(wer)
 
 
 def corpus_wer(refs, hyps):
-    errors = words = 0
-    for r, h in zip(refs, hyps):
-        r, h = normalize_text(r).split(), normalize_text(h).split()
-        errors += edit_distance(r, h)
-        words += len(r)
-    return errors / max(words, 1)
+    """Backwards-compatible wrapper for compute_wer."""
+    return compute_wer(predictions=hyps, references=refs, normalize=True)
 
 
 # ----------------------------------------------------------------------
@@ -331,7 +423,7 @@ def main():
     ap.add_argument("--repeats", type=int, default=1, help="passes over the sample set")
     ap.add_argument("--max_per_bucket", type=int, default=0,
                     help="cap samples per duration bucket (0 = use all)")
-    ap.add_argument("--ref_key", default="text", help="reference transcript key for WER")
+    ap.add_argument("--ref_key", default="text", help="reference transcript key for WER (prioritizes transcript/reference/text, strips language tags)")
     ap.add_argument("--include_load", action="store_true",
                     help="include audio file load/resample time in RTF")
     ap.add_argument("--seed", type=int, default=0)
@@ -446,6 +538,7 @@ def main():
             )
             proc_time = tm["t_total"] + (it["load_time"] if args.include_load else 0.0)
             rec = {
+                "id": s.get("id"),
                 "audio": s["audio"],
                 "bucket": it["bucket"],
                 "repeat": rep,
@@ -460,8 +553,10 @@ def main():
                 "new_tokens": n_tok,
                 "prediction": pred,
             }
-            if args.ref_key in s:
-                rec["reference"] = s[args.ref_key]
+            ref_val = extract_reference_text(s, args.ref_key)
+            if ref_val is not None:
+                rec["reference"] = ref_val
+                rec["transcript"] = ref_val
             records.append(rec)
             n_done += 1
             print(f"[{n_done}/{total}] {it['bucket']:>6} dur={it['duration']:5.1f}s "
@@ -520,17 +615,17 @@ def main():
     }
 
     # WER (if references exist)
-    with_ref = [r for r in records if "reference" in r and r["repeat"] == 0]
+    with_ref = [r for r in records if ("reference" in r or "transcript" in r) and r["repeat"] == 0]
     if with_ref:
-        refs = [r["reference"] for r in with_ref]
-        hyps = [clean_prediction(r["prediction"]) for r in with_ref]
+        refs = [strip_language_tag(r.get("transcript") or r.get("reference")) for r in with_ref]
+        hyps = [strip_language_tag(r["prediction"]) for r in with_ref]
         summary["wer"] = {
-            "overall": round(corpus_wer(refs, hyps), 4),
+            "overall": round(compute_wer(hyps, refs), 4),
             "n_utterances": len(with_ref),
             "by_bucket": {
-                name: round(corpus_wer(
-                    [r["reference"] for r in with_ref if r["bucket"] == name],
-                    [clean_prediction(r["prediction"]) for r in with_ref if r["bucket"] == name],
+                name: round(compute_wer(
+                    [strip_language_tag(r["prediction"]) for r in with_ref if r["bucket"] == name],
+                    [strip_language_tag(r.get("transcript") or r.get("reference")) for r in with_ref if r["bucket"] == name],
                 ), 4)
                 for name, _, _ in BUCKETS
                 if any(r["bucket"] == name for r in with_ref)
