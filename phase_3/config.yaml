@@ -1,5 +1,5 @@
 # ==============================================================================
-# Phase 2: vLLM Migration & Concurrent Inference Configuration
+# Phase 3: vLLM Migration & Concurrent Inference Configuration
 # Objective: Measure continuous batching & concurrency under shared vLLM engine
 # ==============================================================================
 
@@ -9,16 +9,17 @@ model:
   sample_rate: 16000
 
 vllm:
-  gpu_memory_utilization: 0.7
+  gpu_memory_utilization: 0.9
   max_inference_batch_size: 1  # Intentionally 1 per transcribe() call to test vLLM request scheduling
   max_model_len: 4096
 
 benchmark:
   test_file: "data/test.jsonl"
   audio_dir: "data/audio_clips/test"
-  output_dir: "phase2/results"
+  output_dir: "phase_3/results"
   concurrencies: [1, 2, 4, 8, 16, 32, 64]
-  warmup_requests: 3
+  warmup_requests: 5
+  requests_per_bucket: 30
   success_criterion:
     primary_target_p95_rtf: 0.5
     strong_target_p95_rtf: 0.3

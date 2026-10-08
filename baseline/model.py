@@ -87,8 +87,15 @@ class Qwen3ASRModelWrapper:
             asr = Qwen3ASRModel.from_pretrained(
                 self.model_path,
                 dtype=self.torch_dtype,
-                device_map=None,
+                device_map="cuda:0",
+                attn_implementation="flash_attention_2",
             )
+            # asr = Qwen3ASRModel.LLM(
+            #     model=self.model_path,
+            #     gpu_memory_utilization=0.85,
+            #     max_inference_batch_size=128,
+            #     max_new_tokens=4096,
+            # )
             self.model = asr.model
             self.processor = asr.processor
             loaded = True

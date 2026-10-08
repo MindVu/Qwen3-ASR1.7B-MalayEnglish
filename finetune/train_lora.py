@@ -373,10 +373,10 @@ def parse_args():
     # NB: the reference defaults (batch_size=32) assume a large-hour dataset
     # on a big GPU. For a 30-60 min assessment dataset, start much smaller
     # (e.g. 2-4) and rely on grad_acc for effective batch size.
-    p.add_argument("--batch_size", type=int, default=8)
-    p.add_argument("--grad_acc", type=int, default=8)
+    p.add_argument("--batch_size", type=int, default=4)
+    p.add_argument("--grad_acc", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--epochs", type=float, default=10)
+    p.add_argument("--epochs", type=float, default=3)
     p.add_argument("--log_steps", type=int, default=1)
     p.add_argument("--lr_scheduler_type", type=str, default="linear")
     p.add_argument("--warmup_ratio", type=float, default=0.02)

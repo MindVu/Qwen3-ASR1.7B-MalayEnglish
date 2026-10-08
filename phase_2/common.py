@@ -1,5 +1,5 @@
 """
-Phase 2 Common Utilities: text normalization, WER computation, dataset loading, and metrics.
+Phase 2 Common Utilities: text normalization, WER/CER computation, dataset loading, and metrics.
 """
 
 import os
@@ -136,6 +136,71 @@ def compute_wer(predictions: List[str], references: List[str], normalize: bool =
             return float(wer)
         except Exception:
             return float(compute_wer_builtin(predictions=preds, references=refs))
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance between two strings (two-row dynamic programming)."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(
+                prev[j] + 1,                 # deletion
+                cur[j - 1] + 1,              # insertion
+                prev[j - 1] + (ca != cb),    # substitution
+            )
+        prev = cur
+    return prev[-1]
+
+
+def compute_cer_builtin(predictions: List[str], references: List[str]) -> float:
+    """
+    Character Error Rate: total character-level edits / total reference characters.
+    Spaces count as characters (same convention as jiwer / evaluate "cer").
+    """
+    total_chars = 0
+    total_edits = 0
+    for pred, ref in zip(predictions, references):
+        total_chars += len(ref)
+        total_edits += _edit_distance(ref, pred)
+
+    if total_chars == 0:
+        return 0.0
+    return total_edits / total_chars
+
+
+def compute_cer(predictions: List[str], references: List[str], normalize: bool = True) -> float:
+    """
+    Calculates corpus-level Character Error Rate with the same normalization as WER.
+    Chain: evaluate -> jiwer -> builtin DP. Spaces count as characters.
+    """
+    if len(predictions) == 0:
+        return 0.0
+
+    if normalize:
+        preds = [normalize_text(strip_language_tag(p)) for p in predictions]
+        refs = [normalize_text(strip_language_tag(r)) for r in references]
+    else:
+        preds = [strip_language_tag(p) for p in predictions]
+        refs = [strip_language_tag(r) for r in references]
+
+    try:
+        import evaluate
+        cer_metric = evaluate.load("cer")
+        return float(cer_metric.compute(predictions=preds, references=refs))
+    except Exception:
+        try:
+            import jiwer
+            return float(jiwer.cer(reference=refs, hypothesis=preds))
+        except Exception:
+            return float(compute_cer_builtin(predictions=preds, references=refs))
 
 
 def compute_percentiles(values: List[float]) -> Dict[str, float]:
